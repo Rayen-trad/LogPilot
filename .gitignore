@@ -1,0 +1,97 @@
+# ==============================================================================
+# Core Ignored Patterns
+# ==============================================================================
+.env
+data/loghub/
+node_modules/
+.gradle/
+build/
+dist/
+__pycache__/
+*.pyc
+.venv/
+
+# Environment and Secrets
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+
+# Python
+*.py[od]
+*$py.class
+*.so
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environments
+venv/
+ENV/
+env/
+
+# Node.js / React Frontend
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+copilot/frontend/.next/
+copilot/frontend/out/
+
+# Log files and runtime data
+logs/
+*.log
+*.log.*
+sources/**/*.log
+
+# Spark checkpoints and runtime states
+checkpoint/
+checkpoints/
+.checkpoint/
+metastore_db/
+derby.log
+
+# Drain template cache / state artifacts (if generated at runtime)
+*.drain_state
+
+# Benchmark & temporary evaluation outputs
+evaluation/results/*.csv
+evaluation/results/*.parquet
+!evaluation/results/.gitkeep
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE and Editor Files
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~

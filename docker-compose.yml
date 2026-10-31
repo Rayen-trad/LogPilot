@@ -1,0 +1,194 @@
+# ==============================================================================
+# LogPilot — Core Infrastructure Docker Compose
+# Services: Elasticsearch, Kibana, Apache Kafka (KRaft), Redis
+# Profiles: full (16 GB RAM), lite (8 GB RAM)
+# ==============================================================================
+
+networks:
+  logpilot-network:
+    name: logpilot-network
+    driver: bridge
+
+volumes:
+  esdata:
+    driver: local
+  kafkadata:
+    driver: local
+  kibanadata:
+    driver: local
+  redisdata:
+    driver: local
+
+services:
+  # ----------------------------------------------------------------------------
+  # Elasticsearch 8.x: Search Engine & Vector Store
+  # ----------------------------------------------------------------------------
+  elasticsearch:
+    image: elasticsearch:${ELASTIC_VERSION:-8.11.0}
+    container_name: logpilot-elasticsearch
+    profiles:
+      - full
+      - lite
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=logpilot-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms2g -Xmx2g}
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.license.self_generated.type=basic
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: ${ES_MEM_LIMIT:-3g}
+    deploy:
+      resources:
+        limits:
+          memory: ${ES_MEM_LIMIT:-3g}
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - logpilot-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Kibana 8.x: Log & Metrics Visualization Dashboards
+  # ----------------------------------------------------------------------------
+  kibana:
+    image: kibana:${ELASTIC_VERSION:-8.11.0}
+    container_name: logpilot-kibana
+    profiles:
+      - full
+      - lite
+    environment:
+      - SERVER_NAME=kibana
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_MONITORING_COLLECTION_ENABLED=true
+    mem_limit: ${KIBANA_MEM_LIMIT:-1g}
+    deploy:
+      resources:
+        limits:
+          memory: ${KIBANA_MEM_LIMIT:-1g}
+    ports:
+      - "127.0.0.1:${KIBANA_PORT:-5601}:5601"
+    volumes:
+      - kibanadata:/usr/share/kibana/data
+    networks:
+      - logpilot-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -I http://localhost:5601/api/status | grep -q 'HTTP/1.1 200 OK\\|HTTP/1.1 302'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Apache Kafka (KRaft mode): Streaming Message Backbone
+  # ----------------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: logpilot-kafka
+    profiles:
+      - full
+      - lite
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      CLUSTER_ID: '4L62EnnTTAhumZomngEQTQ'
+      KAFKA_JVM_PERFORMANCE_OPTS: '-server -XX:+UseG1GC'
+      KAFKA_HEAP_OPTS: '-Xms512m -Xmx512m'
+    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
+    deploy:
+      resources:
+        limits:
+          memory: ${KAFKA_MEM_LIMIT:-1g}
+    ports:
+      - "127.0.0.1:9092:9094"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    networks:
+      - logpilot-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Redis: Speed Layer (Counters, Active Incidents, Semantic Cache)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: logpilot-redis
+    profiles:
+      - full
+      - lite
+    command: >
+      sh -c '
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
+        else
+          redis-server --appendonly yes
+        fi
+      '
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEM_LIMIT:-256m}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - logpilot-network
+    healthcheck:
+      test: >
+        sh -c '
+          if [ -n "$$REDIS_PASSWORD" ]; then
+            redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG
+          else
+            redis-cli ping | grep -q PONG
+          fi
+        '
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
