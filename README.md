@@ -165,13 +165,8 @@ The project is evaluated along the following quantitative dimensions:
 
 ## 🛠️ Development Milestones
 
-- [ ] **Week 1 (Oct 12 - 18)**: Repository scaffold, Docker Compose (Kafka, ES, Kibana, Redis), Loghub data fetch, Replay service.
-- [ ] **Weeks 2 & 3 (Oct 19 - Nov 1)**: Filebeat shipping, Logstash grok parsing pipelines, index mappings, initial Kibana dashboard. **(M1)**
-- [ ] **Weeks 4 & 5 (Nov 2 - 15)**: Spark Structured Streaming detection, Drain template miner, windowed $z$-scores, HDFS benchmark.
-- [ ] **Week 6 (Nov 16 - 22)**: Microservices shop, Locust load generator, chaos injection, Incident Manager.
-- [ ] **Weeks 7 & 8 (Nov 23 - Dec 6)**: RAG Indexer, embeddings, LangChain RAG pipeline, semantic cache, React chat UI. **(M2)**
-- [ ] **Week 9 (Dec 7 - 13)**: Throughput, freshness, scalability, and copilot evaluation benchmarks.
-- [ ] **Week 10 (Dec 14 - 18)**: Final report, demo recording, presentation slides.
+- [ ] **Week 1 and 2: Repository scaffold, Docker Compose (Kafka, ES, Kibana, Redis), Loghub data fetch, Replay service.
+
 
 ---
 
