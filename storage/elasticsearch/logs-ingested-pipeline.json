@@ -1,0 +1,6 @@
+{
+  "description": "Stamp the time each log doc reached Elasticsearch (freshness = ingested_at - shipped_at)",
+  "processors": [
+    { "set": { "field": "ingested_at", "value": "{{{_ingest.timestamp}}}" } }
+  ]
+}

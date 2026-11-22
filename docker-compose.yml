@@ -18,6 +18,8 @@ volumes:
     driver: local
   redisdata:
     driver: local
+  filebeatdata:
+    driver: local
 
 services:
   # ----------------------------------------------------------------------------
@@ -191,4 +193,140 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # One-shot init: Kafka topics (partitions/retention per the data model)
+  # ----------------------------------------------------------------------------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: logpilot-kafka-init
+    profiles: [full, lite]
+    entrypoint: ["bash", "/scripts/create_topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./ingestion/kafka/create_topics.sh:/scripts/create_topics.sh:ro
+    networks: [logpilot-network]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # One-shot init: Elasticsearch ILM policy, ingest pipeline, index template
+  # ----------------------------------------------------------------------------
+  es-init:
+    image: curlimages/curl:8.5.0
+    container_name: logpilot-es-init
+    profiles: [full, lite]
+    entrypoint: ["sh", "/setup/setup.sh"]
+    environment:
+      ES_URL: http://elasticsearch:9200
+    volumes:
+      - ./storage/elasticsearch:/setup:ro
+    networks: [logpilot-network]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # Filebeat: tails ./logs (replay + shop output) -> Kafka logs.raw
+  # ----------------------------------------------------------------------------
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${ELASTIC_VERSION:-8.11.0}
+    container_name: logpilot-filebeat
+    profiles: [full, lite]
+    user: root
+    # strict.perms off: Windows bind mounts show the config as world-writable.
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    environment:
+      KAFKA_INTERNAL_BOOTSTRAP_SERVERS: kafka:9092
+    mem_limit: ${FILEBEAT_MEM_LIMIT:-256m}
+    volumes:
+      - ./ingestion/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/logs:ro
+      - filebeatdata:/usr/share/filebeat/data
+    networks: [logpilot-network]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Logstash: logs.raw -> grok per source -> logs.parsed + Elasticsearch logs-*
+  # ----------------------------------------------------------------------------
+  logstash:
+    image: docker.elastic.co/logstash/logstash:${ELASTIC_VERSION:-8.11.0}
+    container_name: logpilot-logstash
+    profiles: [full, lite]
+    environment:
+      LS_JAVA_OPTS: ${LS_JAVA_OPTS:--Xms512m -Xmx512m}
+      KAFKA_BOOTSTRAP: kafka:9092
+      ES_HOSTS: http://elasticsearch:9200
+      LS_CONSUMER_THREADS: ${LS_CONSUMER_THREADS:-2}
+      XPACK_MONITORING_ENABLED: "false"
+      PIPELINE_ECS_COMPATIBILITY: disabled
+    mem_limit: ${LOGSTASH_MEM_LIMIT:-1g}
+    volumes:
+      - ./ingestion/logstash/pipelines:/usr/share/logstash/pipeline:ro
+    networks: [logpilot-network]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      es-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9600/_node/pipelines || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # One-shot init: Kibana data view + dashboards (storage/kibana/dashboards.ndjson)
+  # ----------------------------------------------------------------------------
+  kibana-init:
+    image: curlimages/curl:8.5.0
+    container_name: logpilot-kibana-init
+    profiles: [full, lite]
+    entrypoint: ["sh", "/setup/setup.sh"]
+    environment:
+      KIBANA_URL: http://kibana:5601
+    volumes:
+      - ./storage/kibana:/setup:ro
+    networks: [logpilot-network]
+    depends_on:
+      kibana:
+        condition: service_healthy
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # Copilot: Elastic's chatbot-rag-app adapted (Flask API + React UI, one image)
+  # LLM = Groq through its OpenAI-compatible endpoint.
+  # ----------------------------------------------------------------------------
+  copilot:
+    build: ./copilot
+    image: logpilot-copilot
+    container_name: logpilot-copilot
+    profiles: [full, lite]
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ES_INDEX: logs-*
+      ES_INDEX_CHAT_HISTORY: chat-history
+      KIBANA_PUBLIC_URL: http://localhost:${KIBANA_PORT:-5601}
+      LLM_TYPE: openai
+      OPENAI_BASE_URL: https://api.groq.com/openai/v1
+      OPENAI_API_KEY: ${GROQ_API_KEY:-}
+      CHAT_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      PYTHONUNBUFFERED: "1"
+    mem_limit: ${COPILOT_MEM_LIMIT:-640m}
+    ports:
+      - "127.0.0.1:${COPILOT_PORT:-4000}:4000"
+    networks: [logpilot-network]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped

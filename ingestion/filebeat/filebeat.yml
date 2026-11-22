@@ -1,0 +1,29 @@
+# Filebeat: tail replay/shop log files in ./logs and ship raw lines to Kafka logs.raw.
+# fields.source tells Logstash which grok pipeline to apply.
+
+filebeat.inputs:
+  - type: filestream
+    id: hdfs
+    paths: ["/logs/hdfs*.log"]
+    fields: { source: hdfs }
+  - type: filestream
+    id: openssh
+    paths: ["/logs/openssh*.log"]
+    fields: { source: openssh }
+  - type: filestream
+    id: apache
+    paths: ["/logs/apache*.log"]
+    fields: { source: apache }
+
+output.kafka:
+  hosts: ["${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:kafka:9092}"]
+  topic: "logs.raw"
+  key: "%{[fields.source]}"
+  partition.hash:
+    reachable_only: false
+  required_acks: 1
+  compression: lz4
+
+# Filebeat registry (read offsets) lives in a volume so restarts resume, not re-ship.
+path.data: /usr/share/filebeat/data
+logging.level: info
