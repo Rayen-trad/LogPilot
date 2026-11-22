@@ -131,20 +131,38 @@ Verify that all essential services are healthy:
 - **Kibana**: [http://localhost:5601](http://localhost:5601)
 - **Copilot (UI + API)**: [http://localhost:4000](http://localhost:4000)
 
+### 4. Train Templates & Run Detection
+The streaming detector (`spark` service) needs Drain templates trained once by the batch job:
+```bash
+docker compose run --rm spark spark-submit /app/batch/train_templates.py
+docker compose restart spark
+```
+HDFS block-level accuracy (writes `evaluation/results/hdfs_accuracy.csv`):
+```bash
+docker compose run --rm spark spark-submit --master "local[4]" /app/batch/evaluate_hdfs.py
+```
+
 ---
 
 ## 🧪 Failure Scenarios & Chaos Testing
 
 LogPilot includes repeatable chaos scenarios to demonstrate automated anomaly detection, incident correlation, and copilot root-cause explanation:
 
-| Scenario | Command | Expected Log Signature |
+The shop (`api-gateway` → `orders` → `payments`, `inventory`) runs with Locust traffic as part of the stack. Chaos flags live in Redis and every inject/clear is timestamped in `evaluation/results/chaos_log.csv`:
+```bash
+docker compose exec api-gateway python /app/chaos/chaos.py payment-outage   # or: status, clear
+```
+
+| Scenario | Breaks | Expected Log Signature |
 | :--- | :--- | :--- |
-| **Payment Outage** | `python sources/chaos/chaos.py payment-outage` | Connection timeouts & failed transactions in `payments` |
-| **Database Slowdown** | `python sources/chaos/chaos.py db-slowdown` | Slow-query warnings & thread exhaustion in `orders` |
-| **Memory Leak** | `python sources/chaos/chaos.py memory-leak` | Escalating GC warnings followed by pod crash & restart |
-| **Service Crash** | `python sources/chaos/chaos.py service-crash` | Cascading `502 Bad Gateway` upstream failures in `api-gateway` |
-| **Faulty Release** | `python sources/chaos/chaos.py faulty-release` | Immediate surge of new unparsed exception templates |
-| **Clear Failure** | `python sources/chaos/chaos.py clear` | System recovers to baseline; incident is closed |
+| `payment-outage` | `payments` | Provider timeouts in `payments`, failed payments in `orders`, 502s at `api-gateway` |
+| `db-slowdown` | `orders` | Slow-query warnings and query timeouts in `orders`, slow upstream at `api-gateway` |
+| `memory-leak` | `inventory` | Rising heap warnings, then a `MemoryError` crash and restart (repeats) |
+| `service-crash` | `orders` | `orders` exits on each request; `api-gateway` reports it unreachable |
+| `faulty-release` | `inventory` | Version change, then a burst of a never-seen `NullPointerException` |
+| `clear` | | Flags removed; the incident closes after 3 quiet minutes |
+
+The incident manager groups anomalies on dependent services into one incident (`incidents:active` in Redis, `incidents` index, Kibana dashboard **LogPilot — Incidents**) and marks the deepest anomalous service as origin.
 
 ---
 
@@ -166,8 +184,8 @@ The project is evaluated along the following quantitative dimensions:
 
 - [x] **Week 1 (Oct 12 - 18)**: Repository scaffold, Docker Compose (Kafka, ES, Kibana, Redis), Loghub data fetch, Replay service.
 - [x] **Weeks 2 & 3 (Oct 19 - Nov 1)**: Filebeat shipping, Logstash grok parsing pipelines, index mappings, initial Kibana dashboard. **(M1)**
-- [ ] **Weeks 4 & 5 (Nov 2 - 15)**: Spark Structured Streaming detection, Drain template miner, windowed $z$-scores, HDFS benchmark.
-- [ ] **Week 6 (Nov 16 - 22)**: Microservices shop, Locust load generator, chaos injection, Incident Manager.
+- [x] **Weeks 4 & 5 (Nov 2 - 15)**: Spark Structured Streaming detection, Drain template miner, windowed $z$-scores, HDFS benchmark.
+- [x] **Week 6 (Nov 16 - 22)**: Microservices shop, Locust load generator, chaos injection, Incident Manager.
 - [ ] **Weeks 7 & 8 (Nov 23 - Dec 6)**: RAG Indexer, embeddings, LangChain RAG pipeline, semantic cache, React chat UI. **(M2)**
 - [ ] **Week 9 (Dec 7 - 13)**: Throughput, freshness, scalability, and copilot evaluation benchmarks.
 - [ ] **Week 10 (Dec 14 - 18)**: Final report, demo recording, presentation slides.

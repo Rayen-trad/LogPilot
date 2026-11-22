@@ -14,6 +14,10 @@ filebeat.inputs:
     id: apache
     paths: ["/logs/apache*.log"]
     fields: { source: apache }
+  - type: filestream
+    id: shop
+    paths: ["/logs/shop/*.log"]
+    fields: { source: shop }
 
 output.kafka:
   hosts: ["${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:kafka:9092}"]

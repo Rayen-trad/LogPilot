@@ -20,6 +20,8 @@ volumes:
     driver: local
   filebeatdata:
     driver: local
+  sparkstate:
+    driver: local
 
 services:
   # ----------------------------------------------------------------------------
@@ -271,6 +273,7 @@ services:
     mem_limit: ${LOGSTASH_MEM_LIMIT:-1g}
     volumes:
       - ./ingestion/logstash/pipelines:/usr/share/logstash/pipeline:ro
+      - ./ingestion/logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
     networks: [logpilot-network]
     depends_on:
       kafka-init:
@@ -328,5 +331,120 @@ services:
     networks: [logpilot-network]
     depends_on:
       elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Spark: streaming detector (default command) and batch jobs (docker compose run)
+  #   docker compose run --rm spark spark-submit /app/batch/train_templates.py
+  # ----------------------------------------------------------------------------
+  spark:
+    build: ./processing
+    image: logpilot-spark
+    container_name: logpilot-spark
+    profiles: [full, lite]
+    command: ["spark-submit", "--driver-memory", "${SPARK_DRIVER_MEMORY:-1g}", "/app/streaming/detect.py"]
+    environment:
+      PATH: /opt/spark/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      SPARK_MASTER: ${SPARK_MASTER:-local[*]}
+      KAFKA_BOOTSTRAP: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      SPARK_CHECKPOINT_DIR: /state/checkpoints
+      SPARK_WINDOW_DURATION: ${SPARK_WINDOW_DURATION:-1 minute}
+      SPARK_WATERMARK_DURATION: ${SPARK_WATERMARK_DURATION:-2 minutes}
+      ANOMALY_ZSCORE_THRESHOLD: ${ANOMALY_ZSCORE_THRESHOLD:-3.0}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-earliest}
+    mem_limit: ${SPARK_MEM_LIMIT:-2g}
+    volumes:
+      - ./processing:/app:ro
+      - ./data/loghub:/data:ro
+      - sparkstate:/state
+      - ./evaluation/results:/results
+    networks: [logpilot-network]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Demo shop: api-gateway -> orders -> payments, inventory (one image, one file)
+  # Logs to ./logs/shop/<service>.log; failures flipped by sources/chaos/chaos.py
+  #   docker compose exec api-gateway python /app/chaos/chaos.py payment-outage
+  # ----------------------------------------------------------------------------
+  api-gateway: &shop
+    build: ./sources/shop
+    image: logpilot-shop
+    container_name: logpilot-api-gateway
+    profiles: [full, lite]
+    command: ["python", "/app/shop/app.py", "api-gateway"]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    mem_limit: 128m
+    volumes:
+      - ./sources:/app:ro
+      - ./logs/shop:/logs/shop
+      - ./evaluation/results:/results
+    networks: [logpilot-network]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  orders:
+    <<: *shop
+    container_name: logpilot-orders
+    command: ["python", "/app/shop/app.py", "orders"]
+
+  payments:
+    <<: *shop
+    container_name: logpilot-payments
+    command: ["python", "/app/shop/app.py", "payments"]
+
+  inventory:
+    <<: *shop
+    container_name: logpilot-inventory
+    command: ["python", "/app/shop/app.py", "inventory"]
+
+  # Locust: steady simulated customers against the gateway (headless)
+  loadgen:
+    image: locustio/locust:2.31.8
+    container_name: logpilot-loadgen
+    profiles: [full, lite]
+    command: ["-f", "/mnt/locustfile.py", "--headless", "--only-summary",
+              "-u", "${SHOP_USERS:-10}", "-r", "2", "--host", "http://api-gateway:8000"]
+    mem_limit: 256m
+    volumes:
+      - ./sources/loadgen:/mnt:ro
+    networks: [logpilot-network]
+    depends_on: [api-gateway]
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Incident manager: Kafka anomalies -> incidents (Redis + incidents.events)
+  # ----------------------------------------------------------------------------
+  incident-manager:
+    build: ./services/incident_manager
+    image: logpilot-incident-manager
+    container_name: logpilot-incident-manager
+    profiles: [full, lite]
+    command: ["python", "/app/manager.py"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      INCIDENT_MERGE_SECONDS: ${INCIDENT_MERGE_SECONDS:-300}
+      INCIDENT_QUIET_SECONDS: ${INCIDENT_QUIET_SECONDS:-180}
+    mem_limit: 128m
+    volumes:
+      - ./services/incident_manager:/app:ro
+    networks: [logpilot-network]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
     restart: unless-stopped

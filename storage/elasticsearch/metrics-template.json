@@ -1,0 +1,27 @@
+{
+  "index_patterns": ["metrics-windows*"],
+  "priority": 200,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "index.lifecycle.name": "metrics-30d"
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp":    { "type": "date" },
+        "window_start":  { "type": "date" },
+        "window_end":    { "type": "date" },
+        "service":       { "type": "keyword" },
+        "template_id":   { "type": "keyword" },
+        "template":      { "type": "keyword", "ignore_above": 1024 },
+        "level":         { "type": "keyword" },
+        "count":         { "type": "long" },
+        "baseline_mean": { "type": "float" },
+        "baseline_std":  { "type": "float" },
+        "zscore":        { "type": "float" }
+      }
+    }
+  }
+}

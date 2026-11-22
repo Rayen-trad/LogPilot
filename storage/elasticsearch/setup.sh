@@ -14,4 +14,6 @@ put() {
 put _ilm/policy/logs-7d            logs-ilm.json
 put _ingest/pipeline/logs-ingested logs-ingested-pipeline.json
 put _index_template/logpilot-logs  logs-template.json
+put _ilm/policy/metrics-30d         metrics-ilm.json
+put _index_template/logpilot-metrics metrics-template.json
 echo "Elasticsearch setup done."

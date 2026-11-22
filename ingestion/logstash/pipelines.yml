@@ -1,0 +1,7 @@
+# Two independent pipelines: a slow or failing one never blocks the other.
+- pipeline.id: logs        # logs.raw -> grok -> logs.parsed + logs-*
+  path.config: "/usr/share/logstash/pipeline/logs/*.conf"
+- pipeline.id: metrics     # metrics.windows (from Spark) -> metrics-windows
+  path.config: "/usr/share/logstash/pipeline/metrics/*.conf"
+- pipeline.id: incidents   # incidents.events (from the incident manager) -> incidents
+  path.config: "/usr/share/logstash/pipeline/incidents/*.conf"
